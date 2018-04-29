@@ -16,7 +16,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.simplejavamail.email.Email;
 import org.simplejavamail.email.EmailBuilder;
 import org.simplejavamail.*;
-import org.simplejavamail.mailer.*;
+import org.simplejavamail.mailer.Mailer;
+import org.simplejavamail.mailer.MailerBuilder;
 
 
 public class NewFilesSync {
@@ -28,6 +29,27 @@ public class NewFilesSync {
     public static class FileInfo{
         String md5;
         Long lastModified;
+    }
+
+    public static Map<String,String> readProperties() throws IOException{
+        Properties prop = new Properties();
+        InputStream input = null;
+        input = new FileInputStream("config.properties");
+        prop.load(input);
+        System.out.println(prop.getProperty("email"));
+
+        Map<String, String> propertiesMap = new HashMap<String, String>();
+
+        propertiesMap.put("fromEmail", prop.getProperty("fromEmail"));
+        propertiesMap.put("fromPassword", prop.getProperty("fromPassword"));
+        propertiesMap.put("toEmails", prop.getProperty("toEmails"));
+        propertiesMap.put("toName", prop.getProperty("toName"));
+        propertiesMap.put("fromName", prop.getProperty("fromName"));
+        propertiesMap.put("storage", prop.getProperty("storage"));
+        propertiesMap.put("syncLocation", prop.getProperty("syncLocation"));
+        propertiesMap.put("thisFile", prop.getProperty("thisFile"));
+
+        return propertiesMap;
     }
 
     public static Collection getSyncDirFiles(String dirPath){
@@ -61,6 +83,14 @@ public class NewFilesSync {
 
     public static void sendEmail(String filesJson) throws IOException{
         
+        Map<String, String> propertiesMap = readProperties();
+        System.out.println("propertiesmap = " + propertiesMap.toString());
+        String fromName = propertiesMap.get("fromName");
+        String toName   = propertiesMap.get("toName");
+        String fromEmail = propertiesMap.get("fromEmail");
+        String fromPass  = propertiesMap.get("fromPassword");
+        String toEmails  = propertiesMap.get("toEmails");
+
         ObjectMapper mapper = new ObjectMapper();
         TypeReference<HashMap<String, String>> typeRef = new TypeReference<HashMap<String, String>>() {};
         Map<String, String> map = mapper.readValue(filesJson, typeRef);
@@ -70,21 +100,24 @@ public class NewFilesSync {
         String newFilesString = new String();
 
         for (String thisKey : map.keySet()){
-            System.out.println(thisKey);
-            newFilesString += thisKey + "\n";
+            String theseFilesString = map.get(thisKey);
+            newFilesString += thisKey + ": " + theseFilesString + "\n";
         }
 
-        if (!newFilesString.equals("{}")){
+        System.out.println("new files string = " + newFilesString);
+        System.out.println("new files string is empty = " + newFilesString.isEmpty());
+
+        if (!newFilesString.isEmpty()){
              Email email = EmailBuilder.startingBlank()
-            .from("Jon", "nonnimartin@gmail.com")
-            .to("Jon", "nonnimartin@gmail.com")
+            .from(fromName, fromEmail + "@gmail.com")
+            .to(toName, "nonnimartin@gmail.com")
             .withSubject("Updates on Juche Files")
             .withPlainText("Here are the latest changes in our BitTorrent Sync: " + "\n" + newFilesString)
             .buildEmail();
 
-            Mailer mailer = new Mailer("smtp.gmail.com", 465, "nonnimartin@gmail.com", "");
-
-            mailer.sendMail(email);
+            Mailer thisMailer = MailerBuilder.withSMTPServer("smtp.gmail.com", 587, fromEmail, fromPass).buildMailer();
+            System.out.println("sending email");
+            thisMailer.sendMail(email);
         }
     }
 
@@ -139,22 +172,25 @@ public class NewFilesSync {
 
 
     public static void main(String[] args) throws FileNotFoundException, IOException{
+
+        Map<String, String> propertiesMap = readProperties();
        
-        File storageFile = new File("/Users/jonathanmartin/git/bitSyncUpdates/storage.json");
+        File storageFile = new File(propertiesMap.get("storage"));
         Map<String, Map<String,String>> storedFileInfo;
         Set<String> filePathsSet;
         JSONObject emailsJSON = new JSONObject();
         
         if (storageFile.exists()){
-            storedFileInfo = deserializeToMap(readFileToString("/Users/jonathanmartin/git/bitSyncUpdates/storage.json"));
+            storedFileInfo = deserializeToMap(readFileToString(propertiesMap.get("storage")));
             filePathsSet                       = storedFileInfo.keySet();
         }else{
             storedFileInfo = new HashMap();
             filePathsSet = Collections.emptySet();
         }
 
-        String thisLocationString       = "/Users/jonathanmartin/git/bitSyncUpdates";
-        Collection filesCollection      = getSyncDirFiles("/Users/jonathanmartin/Resilio Sync/");
+        String thisLocationString       = propertiesMap.get("thisFile");
+        //Collection filesCollection      = getSyncDirFiles("/Users/jonathanmartin/Resilio Sync/");
+        Collection filesCollection      = getSyncDirFiles(propertiesMap.get("syncLocation"));
         Map<String, String> fileInfoMap = new HashMap<String, String>();
         JSONObject totalJSON            = new JSONObject();
 
