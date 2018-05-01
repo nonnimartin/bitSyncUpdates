@@ -36,7 +36,6 @@ public class NewFilesSync {
         InputStream input = null;
         input = new FileInputStream("config.properties");
         prop.load(input);
-        System.out.println(prop.getProperty("email"));
 
         Map<String, String> propertiesMap = new HashMap<String, String>();
 
@@ -81,21 +80,55 @@ public class NewFilesSync {
         return map;
     }
 
+    public static List<String> getRecentFilesList(String storageFile) throws IOException{
+        List<String>  recentFilesList     = new ArrayList<String>();
+        File thisStorageFile                          = new File(storageFile);
+        Map<String,Map<String,String>> storedFileInfo;
+
+        storedFileInfo = deserializeToMap(FileUtils.readFileToString(thisStorageFile));
+        Set<String> filePathsSet                      = storedFileInfo.keySet();
+
+        //get unix time 2 months ago
+        long twoMonthsAgo = System.currentTimeMillis() - (60 * 24 * 60 * 60 * 1000L);
+        System.out.println("two months ago = " + twoMonthsAgo);
+
+        for (String thisKey : filePathsSet){
+            if (Long.parseLong(storedFileInfo.get(thisKey).get("lastModified")) > twoMonthsAgo && !thisKey.contains(".DS_Store")){
+                recentFilesList.add(thisKey);
+            }
+        }
+
+        return recentFilesList;
+
+    }
+
     public static void sendEmail(String filesJson) throws IOException{
         
         Map<String, String> propertiesMap = readProperties();
-        System.out.println("propertiesmap = " + propertiesMap.toString());
+
+        List<String> recentFilesList = getRecentFilesList(propertiesMap.get("storage"));
+        String recentFilesString     = new String();
+        
+        //add list of files modified in the last 2 months
+        if (!recentFilesList.isEmpty()){
+            recentFilesString += "\n Files added or changed in the last 2 months: \n \n";
+
+            for (String thisFile : recentFilesList){
+                recentFilesString += thisFile + "\n";
+            }
+        }
+
         String fromName = propertiesMap.get("fromName");
         String toName   = propertiesMap.get("toName");
         String fromEmail = propertiesMap.get("fromEmail");
         String fromPass  = propertiesMap.get("fromPassword");
         String toEmails  = propertiesMap.get("toEmails");
 
+        List<String> toEmailsList = new ArrayList<String>(Arrays.asList(toEmails.split(",")));
+
         ObjectMapper mapper = new ObjectMapper();
         TypeReference<HashMap<String, String>> typeRef = new TypeReference<HashMap<String, String>>() {};
         Map<String, String> map = mapper.readValue(filesJson, typeRef);
-
-        System.out.println("this map = " + map.toString());
 
         String newFilesString = new String();
 
@@ -104,20 +137,22 @@ public class NewFilesSync {
             newFilesString += thisKey + ": " + theseFilesString + "\n";
         }
 
-        System.out.println("new files string = " + newFilesString);
-        System.out.println("new files string is empty = " + newFilesString.isEmpty());
+        newFilesString += recentFilesString;
 
         if (!newFilesString.isEmpty()){
-             Email email = EmailBuilder.startingBlank()
-            .from(fromName, fromEmail + "@gmail.com")
-            .to(toName, "nonnimartin@gmail.com")
-            .withSubject("Updates on Juche Files")
-            .withPlainText("Here are the latest changes in our BitTorrent Sync: " + "\n" + newFilesString)
-            .buildEmail();
+            for (String thisEmail : toEmailsList){ 
 
-            Mailer thisMailer = MailerBuilder.withSMTPServer("smtp.gmail.com", 587, fromEmail, fromPass).buildMailer();
-            System.out.println("sending email");
-            thisMailer.sendMail(email);
+                 Email email = EmailBuilder.startingBlank()
+                .from(fromName, fromEmail + "@gmail.com")
+                .to(toName, thisEmail)
+                .withSubject("Updates on Juche Files")
+                .withPlainText("Here are the latest changes in our BitTorrent Sync: " + "\n" + newFilesString)
+                .buildEmail();
+
+                Mailer thisMailer = MailerBuilder.withSMTPServer("smtp.gmail.com", 587, fromEmail, fromPass).buildMailer();
+
+                thisMailer.sendMail(email);
+            }
         }
     }
 
@@ -189,7 +224,6 @@ public class NewFilesSync {
         }
 
         String thisLocationString       = propertiesMap.get("thisFile");
-        //Collection filesCollection      = getSyncDirFiles("/Users/jonathanmartin/Resilio Sync/");
         Collection filesCollection      = getSyncDirFiles(propertiesMap.get("syncLocation"));
         Map<String, String> fileInfoMap = new HashMap<String, String>();
         JSONObject totalJSON            = new JSONObject();
@@ -233,9 +267,7 @@ public class NewFilesSync {
                     totalJSON.put(thisFilePath, thisJSON);
 
                     if (!storedMd5.equals(md5)){
-                        System.out.println("stored = " + storedMd5);
-                        System.out.println("this md5 = " + md5);
-                        System.out.println("this path = " + thisFilePath);
+
                         fis = new FileInputStream(new File(thisFilePath));
                         md5 = org.apache.commons.codec.digest.DigestUtils.md5Hex(fis);
                         fis.close();
@@ -260,6 +292,7 @@ public class NewFilesSync {
         writeToFile(thisLocationString + "/storage.json", totalJSON.toString());
         writeToFile(thisLocationString + "/emails.json", emailsJSON.toString());
         String emailsFileString = readFileToString("emails.json");
+
         sendEmail(emailsFileString);
 
     }
